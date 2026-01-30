@@ -22,18 +22,18 @@
 ## Clean Architecture: два слоя бизнес-правил
 
 ```mermaid
-graph TB
-    subgraph "Application Layer (Use Cases)"
+graph LR
+    subgraph APP["Application Layer"]
         UC[LoadBonusPointsUseCaseImpl]
     end
 
-    subgraph "Domain Layer (Entities + Domain Services)"
+    subgraph DOMAIN["Domain Layer"]
         DS[BonusPointsStateResolver]
         E1[BonusState]
         E2[BonusPointsContext]
     end
 
-    subgraph "Data Layer"
+    subgraph DATA["Data Layer"]
         R[CheckoutRepository]
     end
 
