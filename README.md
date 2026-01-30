@@ -158,23 +158,33 @@ fun `eligibleBelowMax returns MinimumNotReached when decreaseAmount below thresh
 
 ### Почему домен — особый случай
 
-**Домен — самая стабильная часть системы.** Бизнес-правила меняются редко. Замена домена означает создание другого приложения.
+Вернёмся к **Dependency Inversion Principle** (буква D в SOLID):
 
-> «Если вы не разрабатываете фреймворк, вам никогда не придётся заменять доменный слой. Домен — самая стабильная зависимость в вашей системе.»
-> — [Should Domain Models Have Interfaces?](https://dev.to/g-fuchter/should-domain-models-have-interfaces-4h30)
+> Модули верхнего уровня не должны зависеть от модулей нижнего уровня. Оба должны зависеть от абстракций.
 
-Интерфейсы нужны там, где:
-- зависимость **пересекает границу** (application → infrastructure)
-- реализация **может измениться** (другая БД, другой API-провайдер)
-- нужна **изоляция от IO** в тестах
+В Clean Architecture это работает так:
+- **Application** (верхний) не должен зависеть от **Infrastructure** (нижний) → нужен интерфейс (порт)
+- **Application** зависит от **Domain** — но Domain это не "нижний уровень", это **ядро**
 
-Domain Service не попадает ни под один критерий:
-- живёт внутри домена — границу не пересекает
-- содержит бизнес-правила — они стабильны
-- не делает IO — изолировать нечего
+```mermaid
+graph TB
+    subgraph "Направление зависимостей"
+        UI[UI / Presentation] --> APP[Application]
+        APP --> DOMAIN[Domain]
+        INFRA[Infrastructure] --> APP
+    end
+```
 
-> «Доменным сервисам не нужны интерфейсы, поскольку эта логика меняется редко и потребность в полиморфизме минимальна.»
-> — [Dan Does Code](https://www.dandoescode.com/blog/unpacking-the-layers-of-clean-architecture-domain-application-and-infrastructure-services)
+Domain — центр системы, от которого зависят все остальные слои. Это не внешняя зависимость, которую нужно инвертировать. Это **ядро**, к которому всё стремится.
+
+**Интерфейсы нужны для инверсии зависимостей на границах:**
+- application → infrastructure (Repository, API Client)
+- application → external systems (Payment Gateway, Notification Service)
+
+**Интерфейсы не нужны внутри ядра:**
+- Domain Service — часть домена, не пересекает границу
+- Содержит бизнес-правила — они стабильны (меняются только при изменении бизнеса)
+- Не делает IO — изолировать в тестах нечего
 
 ### Вывод
 
