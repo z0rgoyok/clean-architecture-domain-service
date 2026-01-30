@@ -160,7 +160,7 @@ fun `eligibleBelowMax returns MinimumNotReached when decreaseAmount below thresh
 
 **Домен — самая стабильная часть системы.** Бизнес-правила меняются редко. Замена домена означает создание другого приложения.
 
-> "Unless you're designing a framework, you will never have to replace the domain layer. Your domain is the most stable dependency you will have."
+> «Если вы не разрабатываете фреймворк, вам никогда не придётся заменять доменный слой. Домен — самая стабильная зависимость в вашей системе.»
 > — [Should Domain Models Have Interfaces?](https://dev.to/g-fuchter/should-domain-models-have-interfaces-4h30)
 
 Интерфейсы нужны там, где:
@@ -173,7 +173,7 @@ Domain Service не попадает ни под один критерий:
 - содержит бизнес-правила — они стабильны
 - не делает IO — изолировать нечего
 
-> "Domain services don't even really need to be behind interfaces since that logic is less likely to change over time and there's less of a need for polymorphism."
+> «Доменным сервисам не нужны интерфейсы, поскольку эта логика меняется редко и потребность в полиморфизме минимальна.»
 > — [Dan Does Code](https://www.dandoescode.com/blog/unpacking-the-layers-of-clean-architecture-domain-application-and-infrastructure-services)
 
 ### Вывод
