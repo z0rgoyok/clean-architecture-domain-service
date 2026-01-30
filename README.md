@@ -237,11 +237,9 @@ graph LR
 - Да → интерфейс нужен для изоляции в тестах
 - Нет → интерфейс опционален
 
-### Зачем мокать UseCase в тесте Interactor'а?
+### Как тестировать Interactor?
 
-Частый аргумент: "нужен интерфейс UseCase, чтобы мокать его в тесте Interactor'а".
-
-Но подумаем: **что мы тестируем?**
+Interactor комбинирует несколько UseCase:
 
 ```
 Interactor:
@@ -250,30 +248,40 @@ Interactor:
 └── комбинирует результаты
 ```
 
-Если мокаем UseCase A и B — мы тестируем только "склейку". Но реальные баги чаще в логике UseCase, а не в склейке.
+**Два подхода:**
 
-**Лучший подход**: мокать только границу с IO (Repository), использовать реальные UseCase.
+| Подход | Что мокаем | Что тестируем |
+|--------|------------|---------------|
+| Мокаем UseCase | UseCase A, B | Только склейку |
+| Мокаем Repository | Repository | Склейку + логику UseCase |
+
+Оба подхода валидны. Выбор зависит от цели:
+- **Изолированный unit-тест склейки** → мокаем UseCase
+- **Интеграционный тест всей цепочки** → мокаем только Repository
 
 ```kotlin
-// Плохо: мокаем UseCase
+// Вариант 1: изолируем Interactor, мокаем UseCase
 @Test
-fun interactorTest() {
-    val useCaseA = mockk<UseCaseA>()  // Зачем?
-    val useCaseB = mockk<UseCaseB>()  // Зачем?
-    every { useCaseA.invoke() } returns ...
-    // Тестируем только склейку, не реальное поведение
+fun interactorTest_isolated() {
+    val useCaseA = mockk<UseCaseA>()
+    val useCaseB = mockk<UseCaseB>()
+    every { useCaseA.invoke() } returns resultA
+    every { useCaseB.invoke() } returns resultB
+    // Тестируем только логику комбинирования
 }
 
-// Лучше: мокаем только Repository
+// Вариант 2: интеграционный, мокаем только IO
 @Test
-fun interactorTest() {
-    val repository = mockk<Repository>()  // Граница с IO
-    val useCaseA = UseCaseAImpl(repository)  // Реальная логика
-    val useCaseB = UseCaseBImpl(repository)  // Реальная логика
+fun interactorTest_integration() {
+    val repository = mockk<Repository>()
+    val useCaseA = UseCaseAImpl(repository)
+    val useCaseB = UseCaseBImpl(repository)
     val interactor = Interactor(useCaseA, useCaseB)
-    // Тестируем реальное поведение
+    // Тестируем всю цепочку, ловим баги на стыках
 }
 ```
+
+**Для интерфейсов это значит**: если выбираете первый подход — интерфейсы UseCase нужны. Если второй — можно обойтись без них.
 
 ### А ViewModel?
 
