@@ -156,18 +156,131 @@ fun `eligibleBelowMax returns MinimumNotReached when decreaseAmount below thresh
 
 Интерфейс добавил бы косвенность без пользы — мы и так передаём реальный объект.
 
-### А если понадобится полиморфизм?
+### Почему домен — особый случай
 
-Сейчас резолвер один. Нет:
-- разных стратегий резолвинга
-- A/B тестов с разной логикой
-- платформенных различий
+**Домен — самая стабильная часть системы.** Бизнес-правила меняются редко. Замена домена означает создание другого приложения.
 
-Если это появится — тогда и выделим интерфейс. Интерфейс «на будущее» — преждевременная абстракция (YAGNI).
+> "Unless you're designing a framework, you will never have to replace the domain layer. Your domain is the most stable dependency you will have."
+> — [Should Domain Models Have Interfaces?](https://dev.to/g-fuchter/should-domain-models-have-interfaces-4h30)
+
+Интерфейсы нужны там, где:
+- зависимость **пересекает границу** (application → infrastructure)
+- реализация **может измениться** (другая БД, другой API-провайдер)
+- нужна **изоляция от IO** в тестах
+
+Domain Service не попадает ни под один критерий:
+- живёт внутри домена — границу не пересекает
+- содержит бизнес-правила — они стабильны
+- не делает IO — изолировать нечего
+
+> "Domain services don't even really need to be behind interfaces since that logic is less likely to change over time and there's less of a need for polymorphism."
+> — [Dan Does Code](https://www.dandoescode.com/blog/unpacking-the-layers-of-clean-architecture-domain-application-and-infrastructure-services)
 
 ### Вывод
 
-Сигнатуры методов резолвера (`eligibleBelowMax`, `restoredIncrease` и т.д.) — это и есть контракт. Интерфейс просто продублировал бы их без добавления ценности.
+Сигнатуры методов резолвера (`eligibleBelowMax`, `restoredIncrease` и т.д.) — это и есть контракт. Интерфейс продублировал бы их без добавления ценности, потому что:
+
+1. **Нет инверсии зависимостей** — домен не зависит от внешних слоёв
+2. **Нет подмены в тестах** — детерминированная логика тестируется напрямую
+3. **Нет полиморфизма** — бизнес-правила едины для всего приложения
+
+---
+
+## Интерфейсы во всей цепочке: ViewModel → Interactor → UseCase → ...
+
+Рассмотрим вопрос системно: нужны ли интерфейсы на каждом уровне?
+
+```mermaid
+graph LR
+    VM[ViewModel] --> I[Interactor]
+    I --> UC[UseCase]
+    UC --> R[Repository]
+    UC --> DS[Domain Service]
+    R --> DB[(Network/DB)]
+```
+
+### Где интерфейс обязателен?
+
+**Repository** — да, интерфейс нужен:
+- Пересекает границу application → infrastructure
+- Делает IO (сеть, БД)
+- В тестах UseCase мокаем Repository, чтобы не ходить в сеть
+
+### Где интерфейс избыточен?
+
+| Компонент | Интерфейс? | Почему |
+|-----------|------------|--------|
+| **UseCase** | Нет | Внутри application layer, не пересекает границу |
+| **Interactor** | Нет | Внутри application layer, не пересекает границу |
+| **ViewModel** | Нет | Конечная точка, никто от неё не зависит |
+| **Domain Service** | Нет | Внутри domain layer, чистые вычисления |
+
+### Зачем мокать UseCase в тесте Interactor'а?
+
+Частый аргумент: "нужен интерфейс UseCase, чтобы мокать его в тесте Interactor'а".
+
+Но подумаем: **что мы тестируем?**
+
+```
+Interactor:
+├── вызывает UseCase A
+├── вызывает UseCase B
+└── комбинирует результаты
+```
+
+Если мокаем UseCase A и B — мы тестируем только "склейку". Но реальные баги чаще в логике UseCase, а не в склейке.
+
+**Лучший подход**: мокать только границу с IO (Repository), использовать реальные UseCase.
+
+```kotlin
+// Плохо: мокаем UseCase
+@Test
+fun interactorTest() {
+    val useCaseA = mockk<UseCaseA>()  // Зачем?
+    val useCaseB = mockk<UseCaseB>()  // Зачем?
+    every { useCaseA.invoke() } returns ...
+    // Тестируем только склейку, не реальное поведение
+}
+
+// Лучше: мокаем только Repository
+@Test
+fun interactorTest() {
+    val repository = mockk<Repository>()  // Граница с IO
+    val useCaseA = UseCaseAImpl(repository)  // Реальная логика
+    val useCaseB = UseCaseBImpl(repository)  // Реальная логика
+    val interactor = Interactor(useCaseA, useCaseB)
+    // Тестируем реальное поведение
+}
+```
+
+### А ViewModel?
+
+ViewModel — конечная точка. От неё никто не зависит (кроме UI, который не тестируем unit-тестами).
+
+Интерфейс для ViewModel не нужен, потому что:
+- Некому её подменять
+- В тестах ViewModel мокаем Interactor/UseCase? — Нет, лучше мокать Repository
+
+### Принцип
+
+**Мокай границу, не внутренности.**
+
+```mermaid
+graph LR
+    subgraph "Application Layer (без интерфейсов)"
+        VM[ViewModel] --> I[Interactor]
+        I --> UC[UseCase]
+    end
+
+    subgraph "Граница (интерфейс)"
+        UC -.->|interface| RP[Repository]
+    end
+
+    subgraph "Infrastructure"
+        RP -.->|impl| RPI[RepositoryImpl]
+        RPI --> DB[(DB/Network)]
+    end
+```
 
 ---
 
