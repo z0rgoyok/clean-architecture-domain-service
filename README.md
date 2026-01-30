@@ -21,6 +21,15 @@
 
 ## Clean Architecture: два слоя бизнес-правил
 
+На диаграмме Clean Architecture видно два слоя бизнес-правил:
+
+| Слой | Цвет | Ответственность |
+|------|------|-----------------|
+| **Enterprise Business Rules** | жёлтый (Entities) | Чистые бизнес-правила, не зависящие от приложения |
+| **Application Business Rules** | красный (Use Cases) | Оркестрация, специфичная для приложения |
+
+В нашем случае:
+
 ```mermaid
 graph LR
     subgraph APP["Application Layer"]
@@ -42,11 +51,6 @@ graph LR
     DS --> E1
     DS --> E2
 ```
-
-| Слой | Ответственность | Пример |
-|------|-----------------|--------|
-| **Enterprise Business Rules** | Чистые бизнес-правила, не зависящие от приложения | `BonusPointsStateResolver` |
-| **Application Business Rules** | Оркестрация, специфичная для приложения | `LoadBonusPointsUseCaseImpl` |
 
 ---
 
@@ -72,13 +76,13 @@ graph LR
 
 ```mermaid
 flowchart LR
-    subgraph UseCase
+    subgraph UC[UseCase]
         A[Загрузка данных] --> B[Кэширование]
         B --> C[Выбор сценария]
     end
 
-    subgraph DomainService
-        D[Интерпретация результатов] --> E[Применение бизнес-правил]
+    subgraph DS[Domain Service]
+        D[Интерпретация] --> E[Бизнес-правила]
         E --> F[BonusState]
     end
 
@@ -87,35 +91,57 @@ flowchart LR
 
 ---
 
-## Почему резолверу НЕ нужен интерфейс
+## Нужен ли резолверу интерфейс?
 
-### 1. Это не порт/адаптер — это чистая логика
+### Зачем вообще нужны интерфейсы в Clean Architecture?
 
-Интерфейсы в Clean Architecture нужны для:
+Прежде чем ответить на вопрос про резолвер, разберёмся — какую проблему решают интерфейсы:
 
-- **Инверсии зависимостей** — когда внутренний слой зависит от внешнего (Repository, Gateway)
-- **Подмены реализации** — когда есть несколько стратегий или нужен мок для тестов
+1. **Dependency Inversion** — внутренний слой (domain/application) не должен зависеть от внешнего (data/infrastructure). Но ему нужны данные из БД/сети. Решение: domain объявляет *порт* (интерфейс), а data предоставляет *адаптер* (реализацию).
 
-`BonusPointsStateResolver` — это **чистые вычисления внутри домена**. Он не зависит от внешних слоёв, его не нужно подменять.
+2. **Подмена в тестах** — если класс делает IO (сеть, БД, файлы), в тестах мы хотим подставить мок. Интерфейс позволяет это сделать.
+
+3. **Полиморфизм** — несколько реализаций одного контракта (разные провайдеры, стратегии, A/B тесты).
 
 ```mermaid
 graph LR
-    subgraph "Нужен интерфейс"
-        UC1[UseCase] -.->|port| I1[Repository Interface]
-        I1 -.->|implements| R1[RepositoryImpl]
-    end
-
-    subgraph "НЕ нужен интерфейс"
-        UC2[UseCase] -->|direct| DS2[Domain Service]
+    subgraph PORT["Зачем интерфейс (порт)"]
+        UC1[UseCase] -.->|port| I1[Repository]
+        I1 -.->|impl| R1[RepositoryImpl]
+        R1 --> DB[(Database)]
     end
 ```
 
-### 2. Тестируется напрямую без моков
+**Ключевое**: интерфейс нужен, когда зависимость **пересекает границу слоёв** или когда **нужна подмена реализации**.
+
+### Применим критерии к BonusPointsStateResolver
+
+| Критерий | Repository | BonusPointsStateResolver |
+|----------|------------|--------------------------|
+| Пересекает границу слоёв? | Да (application → data) | Нет (application → domain) |
+| Делает IO? | Да (сеть/БД) | Нет (чистые вычисления) |
+| Нужна подмена в тестах? | Да (мокаем сеть) | Нет (передаём реальный объект) |
+| Несколько реализаций? | Возможно | Нет |
+
+Резолвер:
+- живёт **внутри домена** — нет пересечения границ наружу
+- не делает IO — **детерминированные вычисления**
+- тестируется напрямую — передаём `Result` на вход, проверяем `BonusState` на выходе
+
+```mermaid
+graph LR
+    subgraph DIRECT["Прямая зависимость (без интерфейса)"]
+        UC2[UseCase] --> DS2[Domain Service]
+        DS2 --> M[Domain Models]
+    end
+```
+
+### Как выглядит тест без мока
 
 ```kotlin
-// Резолвер — чистая функция, тестируется без DI/моков
 @Test
 fun `eligibleBelowMax returns MinimumNotReached when decreaseAmount below threshold`() {
+    // Создаём реальный объект, не мок
     val resolver = BonusPointsStateResolver(minSpendingAmount = BigDecimal.TEN)
 
     val state = resolver.eligibleBelowMax(
@@ -130,52 +156,24 @@ fun `eligibleBelowMax returns MinimumNotReached when decreaseAmount below thresh
 
 Интерфейс добавил бы косвенность без пользы — мы и так передаём реальный объект.
 
-### 3. Нет полиморфизма
+### А если понадобится полиморфизм?
 
-Резолвер один. Нет:
-
+Сейчас резолвер один. Нет:
 - разных стратегий резолвинга
 - A/B тестов с разной логикой
 - платформенных различий
 
-Интерфейс «на будущее» — это преждевременная абстракция (YAGNI).
+Если это появится — тогда и выделим интерфейс. Интерфейс «на будущее» — преждевременная абстракция (YAGNI).
 
-### 4. Стабильный контракт
+### Вывод
 
-Сигнатуры методов резолвера (`eligibleBelowMax`, `restoredIncrease` и т.д.) — это и есть контракт. Интерфейс просто продублировал бы эти сигнатуры.
-
----
-
-## Сравнение: когда интерфейс нужен vs не нужен
-
-| Критерий | Интерфейс нужен | Интерфейс НЕ нужен |
-|----------|-----------------|---------------------|
-| Зависимость от внешнего слоя | Repository, API Client | Domain Service |
-| Нужна подмена в тестах | Да (мок сети/БД) | Нет (чистые вычисления) |
-| Несколько реализаций | Strategy, разные провайдеры | Одна логика |
-| Инверсия зависимостей | Domain → Data (через порт) | Domain → Domain (напрямую) |
-
-```mermaid
-graph TB
-    subgraph "С интерфейсом (порт)"
-        UC1[UseCase]
-        UC1 -.->|depends on| Port[CheckoutRepository]
-        Port -.->|implemented by| Impl[CheckoutRepositoryImpl]
-        Impl --> Network[Network/DB]
-    end
-
-    subgraph "Без интерфейса (domain service)"
-        UC2[UseCase]
-        UC2 -->|uses directly| DS[BonusPointsStateResolver]
-        DS --> Models[BonusState, Context]
-    end
-```
+Сигнатуры методов резолвера (`eligibleBelowMax`, `restoredIncrease` и т.д.) — это и есть контракт. Интерфейс просто продублировал бы их без добавления ценности.
 
 ---
 
 ## Преимущества текущего решения
 
-### 1. Тестируемость
+### Тестируемость
 
 | Компонент | Что нужно для теста |
 |-----------|---------------------|
@@ -184,26 +182,26 @@ graph TB
 
 Резолвер покрывается unit-тестами за минуты. UseCase требует интеграционного подхода.
 
-### 2. Single Responsibility
+### Single Responsibility
 
 ```
 LoadBonusPointsUseCaseImpl:
 ├── Проверка конфига
 ├── Проверка авторизации
 ├── Резолвинг страны → лимиты
-├── Загрузка decrease/increase (параллельно или нет)
+├── Загрузка decrease/increase
 ├── Кэширование результатов
-└── Делегирование интерпретации → BonusPointsStateResolver
+└── Делегирование интерпретации → Resolver
 
 BonusPointsStateResolver:
-└── Интерпретация Result → BonusState по бизнес-правилам
+└── Интерпретация Result → BonusState
 ```
 
-### 3. Читаемость
+### Читаемость
 
-Все правила «когда показать ошибку», «когда Normal», «когда MaximumReaching» сосредоточены в одном файле (332 строки), а не размазаны по UseCase.
+Все правила «когда показать ошибку», «когда Normal», «когда MaximumReaching» сосредоточены в одном файле, а не размазаны по UseCase.
 
-### 4. Чистота функций
+### Чистота функций
 
 Резолвер **детерминированный**: одинаковые входы → одинаковый выход.
 
@@ -215,11 +213,7 @@ graph LR
     style Resolver fill:#90EE90
 ```
 
-Нет:
-
-- сетевых вызовов
-- мутаций состояния
-- зависимостей на время/рандом
+Нет: сетевых вызовов, мутаций состояния, зависимостей на время/рандом.
 
 ---
 
@@ -228,24 +222,22 @@ graph LR
 | Вопрос | Ответ |
 |--------|-------|
 | Зачем выделен `BonusPointsStateResolver`? | Разделение оркестрации (UseCase) и бизнес-правил (Domain Service) |
-| Почему без интерфейса? | Это не порт, не требует подмены, тестируется напрямую |
+| Почему без интерфейса? | Не пересекает границу слоёв, не требует подмены, тестируется напрямую |
 | Где граница? | UseCase знает **что/когда**, резолвер знает **как интерпретировать** |
 
 ```mermaid
 graph TB
-    subgraph "Clean Architecture"
-        direction TB
-
-        subgraph "Application Layer"
-            UC["LoadBonusPointsUseCaseImpl<br/>(оркестрация, кэш, IO)"]
+    subgraph CA["Clean Architecture"]
+        subgraph AL["Application Layer"]
+            UC["LoadBonusPointsUseCaseImpl"]
         end
 
-        subgraph "Domain Layer"
-            DS["BonusPointsStateResolver<br/>(чистые бизнес-правила)"]
-            E["BonusState, BonusPointsContext<br/>(доменные модели)"]
+        subgraph DL["Domain Layer"]
+            DS["BonusPointsStateResolver"]
+            E["BonusState, BonusPointsContext"]
         end
 
-        UC -->|"использует напрямую<br/>(без интерфейса)"| DS
+        UC -->|"напрямую"| DS
         DS --> E
     end
 ```
